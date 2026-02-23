@@ -35,62 +35,93 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.danyeon.newsreader.core.network.model.Category
+import com.danyeon.newsreader.core.ui.TopBar
+import com.danyeon.newsreader.core.util.WebNavigationHelper
 import com.danyeon.newsreader.feature.news.data.entity.NewsArticle
 import com.danyeon.newsreader.feature.news.presentation.state.NewsState
 import com.danyeon.newsreader.feature.news.presentation.viewmodel.NewsViewModel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 
 @Composable
-fun MainScreen(newsViewModel: NewsViewModel = hiltViewModel()){
+fun MainScreen(newsViewModel: NewsViewModel = hiltViewModel()) {
 
     val listState = rememberLazyListState()
     val newsState by newsViewModel.state.collectAsState()
+    val selectedCategory by newsViewModel.selectedCategory.collectAsState()
 
-    val shouldLoadMore = remember {
-        derivedStateOf {
-            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-            lastVisibleItem != null && lastVisibleItem.index >= listState.layoutInfo.totalItemsCount - 5
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisibleItem >= totalItems - 5 && totalItems > 0
         }
+            .distinctUntilChanged()
+            .filter { it }
+            .collect {
+                newsViewModel.loadNextPage()
+            }
     }
 
-    LaunchedEffect(shouldLoadMore.value) {
-        if (shouldLoadMore.value) {
-            newsViewModel.getNews()
-        }
-    }
-
-    when (newsState){
+    when (newsState) {
         NewsState.Idle -> {}
         NewsState.Loading -> {}
         is NewsState.Success -> {
-            MainScreenContent((newsState as NewsState.Success).data, listState) { }
+            MainScreenContent(
+                (newsState as NewsState.Success).data,
+                listState = listState,
+                selectedCategory = selectedCategory,
+                onCategorySelected = { newsViewModel.updateCategory(it) }
+            )
         }
+
         is NewsState.Error -> {}
     }
 }
 
 @Composable
-private fun MainScreenContent(articles: List<NewsArticle>, listState: LazyListState, onCardClick: (String) -> Unit){
-    Scaffold() { paddingValues ->
+private fun MainScreenContent(
+    articles: List<NewsArticle>,
+    selectedCategory: Category,
+    listState: LazyListState,
+    onCategorySelected: (Category) -> Unit
+) {
+    val context = LocalContext.current
+
+    Scaffold(
+        topBar = { TopBar() }
+    ) { paddingValues ->
         Column(
             modifier = Modifier.padding(paddingValues)
         ) {
             LazyColumn(
                 state = listState
             ) {
+                item {
+                    AnimatedFilterBar(
+                        Category.entries,
+                        selectedCategory = selectedCategory
+                    ) {
+                        onCategorySelected(it)
+                    }
+                }
+
                 items(articles) { article ->
                     CardNews(article) {
-                        onCardClick(article.url)
+                        WebNavigationHelper.openCustomTab(context, article.url)
                     }
                 }
             }
@@ -99,10 +130,10 @@ private fun MainScreenContent(articles: List<NewsArticle>, listState: LazyListSt
 }
 
 @Composable
-fun AnimatedFilterBar(
-    categories: List<String>,
-    selectedCategory: String,
-    onCategorySelected: (String) -> Unit
+private fun AnimatedFilterBar(
+    categories: List<Category>,
+    selectedCategory: Category,
+    onCategorySelected: (Category) -> Unit
 ) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -112,25 +143,22 @@ fun AnimatedFilterBar(
         items(categories) { category ->
             val isSelected = category == selectedCategory
 
-            // 1. 색상 애니메이션 설정
             val containerColor by animateColorAsState(
                 targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surface,
                 label = "ContainerColor"
             )
 
-            // 2. MD3 FilterChip 활용
             FilterChip(
                 selected = isSelected,
                 onClick = { onCategorySelected(category) },
                 label = {
                     Text(
-                        text = category,
+                        text = category.name,
                         style = MaterialTheme.typography.labelLarge
                     )
                 },
                 leadingIcon = {
-                    // 3. 선택 시 아이콘이 나타나는 애니메이션
                     AnimatedVisibility(visible = isSelected) {
                         Icon(
                             imageVector = Icons.Default.Check,
@@ -151,6 +179,7 @@ fun AnimatedFilterBar(
         }
     }
 }
+
 @Composable
 private fun CardNews(
     article: NewsArticle,
@@ -242,6 +271,8 @@ private fun CardNews(
 
 @Preview
 @Composable
-private fun MainScreenPreview(){
-    MainScreenContent(listOf(), rememberLazyListState()) {}
+private fun MainScreenPreview() {
+    MainScreenContent(
+        listOf(), Category.ALL, rememberLazyListState(),
+    ) {}
 }

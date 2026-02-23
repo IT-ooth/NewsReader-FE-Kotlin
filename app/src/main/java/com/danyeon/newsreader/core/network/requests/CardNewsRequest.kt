@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class CardNewsRequest(
-    val category: Category,
+    val category: Category?,
     val level: Level,
     val offset: Int,
     val limit: Int
