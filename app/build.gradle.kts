@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.navigation.compose)
     implementation(libs.okhttp)
+    implementation(libs.brower)
     ksp(libs.hilt.android.compiler)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.okhttp.logging.interceptor)

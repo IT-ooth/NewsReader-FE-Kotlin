@@ -21,6 +21,8 @@ class NewsViewModel @Inject constructor(
 
     private val _state = MutableStateFlow<NewsState>(NewsState.Idle)
     val state = _state.asStateFlow()
+    private val _selectedCategory = MutableStateFlow(Category.ALL)
+    val selectedCategory = _selectedCategory.asStateFlow()
 
     private var currentOffset = 0
     private val limit = 20
@@ -31,7 +33,58 @@ class NewsViewModel @Inject constructor(
     init {
         getNews(isRefresh = true)
     }
-    fun getNews(isRefresh: Boolean = false) {
+
+    fun updateCategory(category: Category) {
+        if (_selectedCategory.value == category) return // 동일 카테고리 중복 호출 방지
+        _selectedCategory.value = category
+        fetchNews(isRefresh = true)
+    }
+
+    fun loadNextPage() {
+        fetchNews(isRefresh = false)
+    }
+
+    private fun fetchNews(isRefresh: Boolean) {
+        if (isRefresh) {
+            currentOffset = 0
+            isLastPage = false
+            allNews.clear()
+            _state.value = NewsState.Loading
+        }
+
+        if (isLastPage || isNextPageLoading) return
+
+        viewModelScope.launch {
+            isNextPageLoading = true
+
+            // Category.ALL일 경우 서버 요청 시 category 파라미터를 null로 넘겨 전체 데이터를 받습니다.
+            val requestCategory = if (_selectedCategory.value == Category.ALL) null else _selectedCategory.value
+
+            runCatching {
+                repo.getNews(CardNewsRequest(
+                    category = requestCategory,
+                    level = Level.LOW,
+                    offset = currentOffset,
+                    limit = limit
+                ))
+            }.onSuccess { newList ->
+                isNextPageLoading = false
+                isLastPage = newList.size < limit
+
+                if (newList.isNotEmpty()) {
+                    currentOffset += limit
+                    allNews.addAll(newList)
+                }
+
+                _state.value = NewsState.Success(allNews.toList())
+            }.onFailure {
+                isNextPageLoading = false
+                _state.value = NewsState.Error(it.message ?: "Network Error")
+            }
+        }
+    }
+
+    fun getNews(category: Category? = null, isRefresh: Boolean = false) {
         if (isRefresh) {
             currentOffset = 0
             isLastPage = false
@@ -46,7 +99,7 @@ class NewsViewModel @Inject constructor(
 
             runCatching {
                 repo.getNews(CardNewsRequest(
-                    category = Category.TECH,
+                    category = category,
                     level = Level.LOW,
                     offset = currentOffset,
                     limit = limit
